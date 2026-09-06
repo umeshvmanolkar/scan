@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Crypto Futures Scanner - Top 5</title>
+    <title>Crypto Futures Scanner - Top 15 FVG & 200 EMA</title>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -19,36 +19,44 @@
             <div class="header-brand">
                 <div class="logo-icon">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="#38EF7D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        <path d="M2 17L12 22L22 17" stroke="#38EF7D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        <path d="M2 12L12 17L22 12" stroke="#38EF7D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="#00e676" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M2 17L12 22L22 17" stroke="#00e676" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M2 12L12 17L22 12" stroke="#00e676" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                     </svg>
                 </div>
                 <div class="brand-text">
-                    <h1>SHARK <span>FUTURES</span></h1>
-                    <span class="badge-gh">GitHub Pages Compatible</span>
+                    <h1>SHARK <span>FVG SCANNER</span></h1>
+                    <span class="badge-gh">Top 15 Futures • 200 EMA Filter</span>
                 </div>
             </div>
             
             <div class="header-actions">
+                <div class="shortcut-hint">
+                    <span class="hint-key">Type Number + Enter</span>
+                    <span class="hint-desc">e.g. 5➔Enter, 15➔Enter to switch timeframe</span>
+                </div>
                 <div class="connection-status" id="connectionStatus">
                     <span class="status-dot online"></span>
-                    <span class="status-text">Connected</span>
-                </div>
-                <div class="data-source-badge">
-                    <span class="source-label">Source:</span>
-                    <span class="source-value" id="dataSourceName">Shark Futures / Public Stream</span>
+                    <span class="status-text" id="statusText">Scanner Engine Active</span>
                 </div>
             </div>
         </header>
 
         <!-- Main Dashboard Layout -->
         <main class="dashboard-main">
-            <!-- Sidebar: Top 5 Crypto Pair Selector -->
+            <!-- Sidebar: Top 15 Crypto Pair Selector -->
             <aside class="sidebar">
                 <div class="sidebar-header">
-                    <h2>Top 5 Cryptos</h2>
+                    <h2>Top 15 Cryptos</h2>
                     <span class="subtitle">Futures Market</span>
+                </div>
+
+                <!-- Signal Filter Tabs -->
+                <div class="filter-tabs" id="filterTabs">
+                    <button class="filter-btn active" data-filter="all">All (15)</button>
+                    <button class="filter-btn" data-filter="signal">Signals ⚡</button>
+                    <button class="filter-btn" data-filter="bullish">Bullish 🟢</button>
+                    <button class="filter-btn" data-filter="bearish">Bearish 🔴</button>
                 </div>
 
                 <div class="crypto-list" id="cryptoList">
@@ -60,7 +68,7 @@
                 </div>
 
                 <div class="sidebar-footer">
-                    <p>Click any pair to load interactive chart.</p>
+                    <p>🟢 Bullish / 🔴 Bearish signals filter by 200 EMA + 3rd Candle FVG close.</p>
                 </div>
             </aside>
 
@@ -77,28 +85,41 @@
                             <span class="current-price" id="currentPrice">--.--</span>
                             <span class="price-change-badge neutral" id="priceChange">0.00%</span>
                         </div>
-                        <div class="ohlc-summary" id="ohlcSummary">
-                            <span>O: <strong id="ohlcOpen">--</strong></span>
-                            <span>H: <strong id="ohlcHigh">--</strong></span>
-                            <span>L: <strong id="ohlcLow">--</strong></span>
-                            <span>C: <strong id="ohlcClose">--</strong></span>
+                        <div class="ema-status-badge" id="emaStatusBadge">
+                            <span>200 EMA: <strong id="ema200Val">--</strong></span>
                         </div>
                     </div>
 
                     <div class="timeframe-controls" id="timeframeSelector">
-                        <button class="tf-btn" data-tf="15m">15m</button>
-                        <button class="tf-btn active" data-tf="1h">1h</button>
+                        <button class="tf-btn" data-tf="1m">1m</button>
+                        <button class="tf-btn" data-tf="5m">5m</button>
+                        <button class="tf-btn active" data-tf="15m">15m</button>
+                        <button class="tf-btn" data-tf="1h">1h</button>
                         <button class="tf-btn" data-tf="4h">4h</button>
                         <button class="tf-btn" data-tf="1d">1D</button>
                     </div>
                 </div>
 
+                <!-- Signal Overview Banner -->
+                <div class="signal-banner neutral" id="signalBanner">
+                    <div class="banner-icon">⚡</div>
+                    <div class="banner-text" id="bannerText">Select a crypto coin to inspect active FVGs & 200 EMA trends.</div>
+                </div>
+
                 <!-- Interactive Chart Canvas Container -->
                 <div class="chart-wrapper">
                     <div id="chartContainer" class="chart-container"></div>
+                    
+                    <!-- Keyboard Shortcut Toast HUD -->
+                    <div class="shortcut-hud hidden" id="shortcutHud">
+                        <div class="hud-label">Timeframe:</div>
+                        <div class="hud-value" id="hudValue">15m</div>
+                        <div class="hud-sub">Press Enter to Apply</div>
+                    </div>
+
                     <div class="chart-overlay-loader" id="chartLoader">
                         <div class="spinner"></div>
-                        <span>Loading Market Data...</span>
+                        <span>Scanning FVG Patterns...</span>
                     </div>
                 </div>
 
@@ -113,12 +134,12 @@
                         <span class="info-val" id="val24hLow">--</span>
                     </div>
                     <div class="info-item">
-                        <span class="info-label">24h Volume:</span>
-                        <span class="info-val" id="val24hVolume">--</span>
+                        <span class="info-label">200 EMA:</span>
+                        <span class="info-val" id="valEma200">--</span>
                     </div>
                     <div class="info-item">
-                        <span class="info-label">Last Updated:</span>
-                        <span class="info-val" id="valLastUpdated">Just now</span>
+                        <span class="info-label">Active FVGs:</span>
+                        <span class="info-val" id="valActiveFvgs">0</span>
                     </div>
                 </div>
             </section>

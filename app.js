@@ -1,29 +1,45 @@
 /**
- * Crypto Futures Scanner Prototype - Top 5 Cryptos
- * GitHub Pages Compatible - Real-Time WebSocket & Lightweight Charts Engine
+ * Crypto Futures Scanner - Top 15 Cryptos
+ * FVG (15m & 4h) + 200 EMA Filter Engine
+ * TradingView Lightweight Charts Integration & Keyboard Timeframe Shortcuts
  */
 
-// Top 5 Futures Assets
-const TOP_5_CRYPTOS = [
-    { symbol: 'BTCUSDT', name: 'Bitcoin Futures', icon: '₿' },
-    { symbol: 'ETHUSDT', name: 'Ethereum Futures', icon: 'Ξ' },
-    { symbol: 'SOLUSDT', name: 'Solana Futures', icon: '◎' },
-    { symbol: 'BNBUSDT', name: 'BNB Futures', icon: '◈' },
-    { symbol: 'XRPUSDT', name: 'XRP Futures', icon: '✕' }
+const TOP_15_CRYPTOS = [
+    { symbol: 'BTCUSDT', name: 'Bitcoin Futures' },
+    { symbol: 'ETHUSDT', name: 'Ethereum Futures' },
+    { symbol: 'SOLUSDT', name: 'Solana Futures' },
+    { symbol: 'BNBUSDT', name: 'BNB Futures' },
+    { symbol: 'XRPUSDT', name: 'XRP Futures' },
+    { symbol: 'DOGEUSDT', name: 'Dogecoin Futures' },
+    { symbol: 'ADAUSDT', name: 'Cardano Futures' },
+    { symbol: 'AVAXUSDT', name: 'Avalanche Futures' },
+    { symbol: 'LINKUSDT', name: 'Chainlink Futures' },
+    { symbol: 'DOTUSDT', name: 'Polkadot Futures' },
+    { symbol: 'NEARUSDT', name: 'NEAR Protocol Futures' },
+    { symbol: 'SUIUSDT', name: 'Sui Futures' },
+    { symbol: 'PEPEUSDT', name: 'Pepe Futures' },
+    { symbol: 'POLUSDT', name: 'Polygon Futures' },
+    { symbol: 'LTCUSDT', name: 'Litecoin Futures' }
 ];
 
 // App State
 const state = {
     activeSymbol: 'BTCUSDT',
-    activeTimeframe: '1h',
+    activeTimeframe: '15m',
+    activeFilter: 'all',
     tickers: {},
+    signals: {},
+    activeFvgs: {},
     chart: null,
     candleSeries: null,
     volumeSeries: null,
-    ws: null,
-    wsTicker: null,
-    currentCandle: null,
-    dataSource: 'Futures Real-time Feed'
+    ema200Series: null,
+    priceLineTop: null,
+    priceLineBottom: null,
+    activePriceLines: [],
+    typedShortcut: '',
+    shortcutTimeout: null,
+    backendUrl: 'https://crypto-futures-scanner-backend.onrender.com'
 };
 
 // DOM Element Selectors
@@ -36,14 +52,19 @@ const elements = {
     ohlcHigh: document.getElementById('ohlcHigh'),
     ohlcLow: document.getElementById('ohlcLow'),
     ohlcClose: document.getElementById('ohlcClose'),
+    ema200Val: document.getElementById('ema200Val'),
+    signalBanner: document.getElementById('signalBanner'),
+    bannerText: document.getElementById('bannerText'),
     chartContainer: document.getElementById('chartContainer'),
     chartLoader: document.getElementById('chartLoader'),
     timeframeSelector: document.getElementById('timeframeSelector'),
-    dataSourceName: document.getElementById('dataSourceName'),
+    filterTabs: document.getElementById('filterTabs'),
     val24hHigh: document.getElementById('val24hHigh'),
     val24hLow: document.getElementById('val24hLow'),
-    val24hVolume: document.getElementById('val24hVolume'),
-    valLastUpdated: document.getElementById('valLastUpdated')
+    valEma200: document.getElementById('valEma200'),
+    valActiveFvgs: document.getElementById('valActiveFvgs'),
+    shortcutHud: document.getElementById('shortcutHud'),
+    hudValue: document.getElementById('hudValue')
 };
 
 // Initialize Application
@@ -51,16 +72,16 @@ document.addEventListener('DOMContentLoaded', () => {
     initChart();
     renderCryptoSidebar();
     bindEvents();
-    fetchMarketOverview();
+    bindKeyboardShortcuts();
+    fetchScannerData();
     loadCandleData(state.activeSymbol, state.activeTimeframe);
-    initAllTickersWebSocket();
 
-    // Auto refresh tickers every 10 seconds as backup
-    setInterval(fetchMarketOverview, 10000);
+    // Auto-refresh scanner signals every 15 seconds
+    setInterval(fetchScannerData, 15000);
 });
 
 /* ==========================================================================
-   Chart Initialization & Configuration (Isolated Volume & AutoScale)
+   Chart Initialization & Configuration (200 EMA + FVG PriceLines)
    ========================================================================== */
 function initChart() {
     if (!window.LightweightCharts) {
@@ -68,7 +89,6 @@ function initChart() {
         return;
     }
 
-    // Chart Configuration
     const chartOptions = {
         layout: {
             background: { type: 'solid', color: '#0b0e14' },
@@ -82,26 +102,13 @@ function initChart() {
         },
         crosshair: {
             mode: LightweightCharts.CrosshairMode.Normal,
-            vertLine: {
-                color: 'rgba(0, 230, 118, 0.4)',
-                width: 1,
-                style: 3,
-                labelBackgroundColor: '#1c2333'
-            },
-            horzLine: {
-                color: 'rgba(0, 230, 118, 0.4)',
-                width: 1,
-                style: 3,
-                labelBackgroundColor: '#1c2333'
-            }
+            vertLine: { color: 'rgba(0, 230, 118, 0.4)', width: 1, style: 3 },
+            horzLine: { color: 'rgba(0, 230, 118, 0.4)', width: 1, style: 3 }
         },
         rightPriceScale: {
             borderColor: 'rgba(255, 255, 255, 0.08)',
             autoScale: true,
-            scaleMargins: {
-                top: 0.1,
-                bottom: 0.25
-            }
+            scaleMargins: { top: 0.1, bottom: 0.25 }
         },
         timeScale: {
             borderColor: 'rgba(255, 255, 255, 0.08)',
@@ -112,7 +119,7 @@ function initChart() {
 
     state.chart = LightweightCharts.createChart(elements.chartContainer, chartOptions);
 
-    // Candlestick Series on main price scale ('right')
+    // Candlestick Series
     state.candleSeries = state.chart.addCandlestickSeries({
         upColor: '#00e676',
         downColor: '#ff5252',
@@ -122,18 +129,22 @@ function initChart() {
         wickDownColor: '#ff5252'
     });
 
-    // Volume Series on isolated 'volume' price scale to prevent scale overlap
+    // 200 EMA Line Series (Orange Line)
+    state.ema200Series = state.chart.addLineSeries({
+        color: '#ff9800',
+        lineWidth: 2,
+        title: 'EMA 200',
+        priceLineVisible: false
+    });
+
+    // Volume Series
     state.volumeSeries = state.chart.addHistogramSeries({
         priceScaleId: 'volume_scale',
         priceFormat: { type: 'volume' }
     });
 
-    // Configure dedicated volume scale margins at the bottom
     state.chart.priceScale('volume_scale').applyOptions({
-        scaleMargins: {
-            top: 0.8,
-            bottom: 0
-        }
+        scaleMargins: { top: 0.8, bottom: 0 }
     });
 
     // Responsive Resize Observer
@@ -144,15 +155,106 @@ function initChart() {
         }
     });
     resizeObserver.observe(elements.chartContainer);
+}
 
-    // Crosshair movement listener to update OHLC header
-    state.chart.subscribeCrosshairMove(param => {
-        if (!param || !param.time || !param.seriesPrices) return;
-        const data = param.seriesPrices.get(state.candleSeries);
-        if (data) {
-            updateOHLCDisplay(data.open, data.high, data.low, data.close);
+/* ==========================================================================
+   TradingView Style Keyboard Timeframe Shortcuts (e.g. 5 -> Enter, 15 -> Enter)
+   ========================================================================== */
+function bindKeyboardShortcuts() {
+    window.addEventListener('keydown', (e) => {
+        // Ignore if user is typing in an input element
+        if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+
+        const key = e.key;
+
+        // Number keys or 'd' for 1D
+        if (/^[0-9]$/.test(key) || key.toLowerCase() === 'd') {
+            state.typedShortcut += key;
+            showShortcutHud(state.typedShortcut);
+
+            clearTimeout(state.shortcutTimeout);
+            state.shortcutTimeout = setTimeout(() => {
+                state.typedShortcut = '';
+                hideShortcutHud();
+            }, 3000);
+        } else if (key === 'Enter' && state.typedShortcut.length > 0) {
+            e.preventDefault();
+            applyShortcutTimeframe(state.typedShortcut);
+            state.typedShortcut = '';
+            hideShortcutHud();
+        } else if (key === 'Escape') {
+            state.typedShortcut = '';
+            hideShortcutHud();
         }
     });
+}
+
+function applyShortcutTimeframe(input) {
+    const lower = input.toLowerCase();
+    let tf = '15m';
+
+    if (lower === '1') tf = '1m';
+    else if (lower === '5') tf = '5m';
+    else if (lower === '15') tf = '15m';
+    else if (lower === '60' || lower === '1h') tf = '1h';
+    else if (lower === '240' || lower === '4h') tf = '4h';
+    else if (lower === 'd' || lower === '1d') tf = '1d';
+    else tf = `${input}m`;
+
+    switchTimeframe(tf);
+}
+
+function showShortcutHud(val) {
+    elements.hudValue.textContent = val + '...';
+    elements.shortcutHud.classList.remove('hidden');
+}
+
+function hideShortcutHud() {
+    elements.shortcutHud.classList.add('hidden');
+}
+
+/* ==========================================================================
+   Event Bindings & Sidebar Filters
+   ========================================================================== */
+function bindEvents() {
+    // Timeframe button clicks
+    elements.timeframeSelector.querySelectorAll('.tf-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const tf = e.target.dataset.tf;
+            if (tf) switchTimeframe(tf);
+        });
+    });
+
+    // Filter tabs click
+    elements.filterTabs.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            elements.filterTabs.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            e.target.classList.add('active');
+            state.activeFilter = e.target.dataset.filter;
+            renderCryptoSidebar();
+        });
+    });
+}
+
+function switchTimeframe(tf) {
+    state.activeTimeframe = tf;
+    elements.timeframeSelector.querySelectorAll('.tf-btn').forEach(b => {
+        if (b.dataset.tf === tf) b.classList.add('active');
+        else b.classList.remove('active');
+    });
+    loadCandleData(state.activeSymbol, tf);
+}
+
+function switchActiveCrypto(symbol, autoTf = null) {
+    state.activeSymbol = symbol;
+    elements.activeSymbol.textContent = symbol;
+
+    // Highlight active sidebar card
+    renderCryptoSidebar();
+
+    // Auto switch timeframe if signal specifies 15m or 4h
+    const targetTf = autoTf || state.activeTimeframe;
+    switchTimeframe(targetTf);
 }
 
 /* ==========================================================================
@@ -161,11 +263,14 @@ function initChart() {
 function renderCryptoSidebar() {
     elements.cryptoList.innerHTML = '';
 
-    TOP_5_CRYPTOS.forEach(crypto => {
-        const ticker = state.tickers[crypto.symbol] || {
-            lastPrice: '--.--',
-            change24h: 0
-        };
+    TOP_15_CRYPTOS.forEach(crypto => {
+        const ticker = state.tickers[crypto.symbol] || { lastPrice: 0, change24h: 0 };
+        const signal = state.signals[crypto.symbol];
+
+        // Apply filter tab rules
+        if (state.activeFilter === 'signal' && !signal) return;
+        if (state.activeFilter === 'bullish' && (!signal || signal.type !== 'bullish')) return;
+        if (state.activeFilter === 'bearish' && (!signal || signal.type !== 'bearish')) return;
 
         const isSelected = crypto.symbol === state.activeSymbol;
         const changeClass = ticker.change24h > 0 ? 'positive' : ticker.change24h < 0 ? 'negative' : 'neutral';
@@ -175,23 +280,33 @@ function renderCryptoSidebar() {
         card.className = `crypto-card ${isSelected ? 'active' : ''}`;
         card.dataset.symbol = crypto.symbol;
 
+        let signalBadgeHtml = '';
+        if (signal) {
+            const badgeClass = signal.type === 'bullish' ? 'bullish' : 'bearish';
+            const icon = signal.type === 'bullish' ? '🟢' : '🔴';
+            signalBadgeHtml = `<span class="signal-pill ${badgeClass}">${icon} ${signal.timeframe} FVG</span>`;
+        }
+
         card.innerHTML = `
             <div class="crypto-info">
-                <div class="crypto-symbol">${crypto.symbol}</div>
+                <div class="symbol-row">
+                    <span class="crypto-symbol">${crypto.symbol}</span>
+                    ${signalBadgeHtml}
+                </div>
                 <div class="crypto-name">${crypto.name}</div>
             </div>
             <div class="crypto-metrics">
-                <div class="crypto-price" id="card-price-${crypto.symbol}">${formatPrice(ticker.lastPrice)}</div>
-                <div class="badge-change ${changeClass}" id="card-change-${crypto.symbol}">
+                <div class="crypto-price">${formatPrice(ticker.lastPrice)}</div>
+                <div class="badge-change ${changeClass}">
                     ${changeSign}${ticker.change24h.toFixed(2)}%
                 </div>
             </div>
         `;
 
         card.addEventListener('click', () => {
-            if (state.activeSymbol !== crypto.symbol) {
-                switchActiveCrypto(crypto.symbol);
-            }
+            // Auto open in signal's timeframe if present
+            const autoTf = signal ? signal.timeframe : null;
+            switchActiveCrypto(crypto.symbol, autoTf);
         });
 
         elements.cryptoList.appendChild(card);
@@ -199,133 +314,147 @@ function renderCryptoSidebar() {
 }
 
 /* ==========================================================================
-   Event Bindings & Switching
-   ========================================================================== */
-function bindEvents() {
-    // Timeframe selector clicks
-    elements.timeframeSelector.querySelectorAll('.tf-btn').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            const tf = e.target.dataset.tf;
-            if (tf && state.activeTimeframe !== tf) {
-                elements.timeframeSelector.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
-                e.target.classList.add('active');
-                state.activeTimeframe = tf;
-                loadCandleData(state.activeSymbol, state.activeTimeframe);
-            }
-        });
-    });
-}
-
-function switchActiveCrypto(symbol) {
-    state.activeSymbol = symbol;
-    elements.activeSymbol.textContent = symbol;
-
-    // Highlight active card
-    document.querySelectorAll('.crypto-card').forEach(card => {
-        if (card.dataset.symbol === symbol) {
-            card.classList.add('active');
-        } else {
-            card.classList.remove('active');
-        }
-    });
-
-    // Update active ticker header metrics if available
-    const ticker = state.tickers[symbol];
-    if (ticker) {
-        updateActiveHeader(ticker);
-    }
-
-    // Load candle chart for new symbol
-    loadCandleData(symbol, state.activeTimeframe);
-}
-
-/* ==========================================================================
-   Data Fetching & WebSocket Real-Time Stream Engine
+   Data Fetching & FVG Processing Engine
    ========================================================================== */
 
 /**
- * Fetch Market Tickers overview
+ * Fetch Scanner signals for Top 15 coins
  */
-async function fetchMarketOverview() {
+async function fetchScannerData() {
     try {
-        const symbolsQuery = JSON.stringify(TOP_5_CRYPTOS.map(c => c.symbol));
-        const res = await fetch(`https://fapi.binance.com/fapi/v1/ticker/24hr?symbols=${encodeURIComponent(symbolsQuery)}`);
-        
-        if (res.ok) {
-            const data = await res.json();
-            data.forEach(item => {
-                const tickerData = {
-                    symbol: item.symbol,
-                    lastPrice: parseFloat(item.lastPrice),
-                    change24h: parseFloat(item.priceChangePercent),
-                    high24h: parseFloat(item.highPrice),
-                    low24h: parseFloat(item.lowPrice),
-                    volume24h: parseFloat(item.quoteVolume)
+        // Fetch 24h tickers first
+        const symbolsQuery = JSON.stringify(TOP_15_CRYPTOS.map(c => c.symbol));
+        const resTicker = await fetch(`https://fapi.binance.com/fapi/v1/ticker/24hr?symbols=${encodeURIComponent(symbolsQuery)}`);
+        if (resTicker.ok) {
+            const data = await resTicker.json();
+            data.forEach(t => {
+                state.tickers[t.symbol] = {
+                    symbol: t.symbol,
+                    lastPrice: parseFloat(t.lastPrice),
+                    change24h: parseFloat(t.priceChangePercent),
+                    high24h: parseFloat(t.highPrice),
+                    low24h: parseFloat(t.lowPrice)
                 };
-                state.tickers[item.symbol] = tickerData;
-                updateSidebarCard(tickerData);
             });
-
-            const activeTicker = state.tickers[state.activeSymbol];
-            if (activeTicker) {
-                updateActiveHeader(activeTicker);
-            }
-
-            elements.valLastUpdated.textContent = new Date().toLocaleTimeString();
         }
+
+        // Attempt Render Backend for 15m & 4h FVG signals
+        try {
+            const resScanner = await fetch(`${state.backendUrl}/api/scanner`, { timeout: 4000 });
+            if (resScanner.ok) {
+                const scannerData = await resScanner.json();
+                processBackendScanner(scannerData.symbols);
+                return;
+            }
+        } catch (e) {
+            // Client-side fallback computation if backend server is starting
+        }
+
+        // Direct Client-Side FVG Computation Fallback
+        await computeClientSideScanner();
+
     } catch (err) {
-        console.warn('Ticker update note:', err);
+        console.warn('Scanner overview notice:', err);
+    } finally {
+        renderCryptoSidebar();
     }
 }
 
+function processBackendScanner(symbolResults) {
+    state.signals = {};
+    state.activeFvgs = {};
+
+    symbolResults.forEach(item => {
+        state.activeFvgs[item.symbol] = [
+            ...(item.active_fvgs_15m || []),
+            ...(item.active_fvgs_4h || [])
+        ];
+
+        if (item.signals && item.signals.length > 0) {
+            state.signals[item.symbol] = item.signals[0]; // Most significant signal
+        }
+    });
+
+    updateBanner();
+}
+
 /**
- * Load Historical Candlestick Data & Connect Real-Time Stream
+ * Client-Side FVG & 200 EMA Scanner Fallback
+ */
+async function computeClientSideScanner() {
+    for (const crypto of TOP_15_CRYPTOS) {
+        try {
+            const candles15m = await fetchKlines(crypto.symbol, '15m', 250);
+            if (candles15m.length >= 200) {
+                const closes = candles15m.map(c => c.close);
+                const ema200 = calculateEMA(closes, 200);
+                const fvgs = detectFVGs(candles15m, ema200, '15m');
+                const active15m = fvgs.filter(f => !f.mitigated);
+                const aligned15m = active15m.filter(f => f.emaAligned);
+
+                if (!state.activeFvgs[crypto.symbol]) state.activeFvgs[crypto.symbol] = [];
+                state.activeFvgs[crypto.symbol].push(...active15m);
+
+                if (aligned15m.length > 0) {
+                    const latest = aligned15m[aligned15m.length - 1];
+                    state.signals[crypto.symbol] = { timeframe: '15m', type: latest.type, fvg: latest };
+                }
+            }
+        } catch (e) {}
+    }
+    updateBanner();
+}
+
+/**
+ * Load Candlestick Data & Draw Persistent FVG Boxes + 200 EMA Line
  */
 async function loadCandleData(symbol, timeframe) {
     showChartLoader(true);
 
-    // Disconnect existing chart websocket stream
-    if (state.ws) {
-        state.ws.close();
-        state.ws = null;
-    }
-
     try {
-        const candles = await fetchKlines(symbol, timeframe);
+        const candles = await fetchKlines(symbol, timeframe, 350);
 
         if (candles && candles.length > 0) {
-            // Reset series and apply autoScale
-            state.candleSeries.setData([]);
-            state.volumeSeries.setData([]);
-
             const candleFormatted = candles.map(c => ({
-                time: c.time,
-                open: c.open,
-                high: c.high,
-                low: c.low,
-                close: c.close
+                time: c.time, open: c.open, high: c.high, low: c.low, close: c.close
             }));
 
             const volumeFormatted = candles.map(c => ({
-                time: c.time,
-                value: c.volume,
+                time: c.time, value: c.volume,
                 color: c.close >= c.open ? 'rgba(0, 230, 118, 0.4)' : 'rgba(255, 82, 82, 0.4)'
             }));
 
+            // Compute 200 EMA Line
+            const closes = candles.map(c => c.close);
+            const ema200Values = calculateEMA(closes, 200);
+            const emaFormatted = candles.map((c, i) => ({
+                time: c.time,
+                value: ema200Values[i]
+            })).filter(item => item.value !== null && !isNaN(item.value));
+
+            // Set Chart Series Data
             state.candleSeries.setData(candleFormatted);
             state.volumeSeries.setData(volumeFormatted);
+            state.ema200Series.setData(emaFormatted);
 
-            // Re-scale right axis for exact price range of selected crypto
+            // Re-scale Y-axis
             state.chart.priceScale('right').applyOptions({ autoScale: true });
             state.chart.timeScale().fitContent();
 
-            // Set OHLC summary to latest candle
+            // Header OHLC & EMA update
             const lastCandle = candleFormatted[candleFormatted.length - 1];
-            state.currentCandle = lastCandle;
-            updateOHLCDisplay(lastCandle.open, lastCandle.high, lastCandle.low, lastCandle.close);
+            const lastEma = emaFormatted.length > 0 ? emaFormatted[emaFormatted.length - 1].value : null;
+            
+            elements.currentPrice.textContent = formatPrice(lastCandle.close);
+            elements.ema200Val.textContent = lastEma ? formatPrice(lastEma) : '--';
+            elements.valEma200.textContent = lastEma ? formatPrice(lastEma) : '--';
 
-            // Connect Live WebSocket Stream for active symbol & timeframe!
-            connectLiveStream(symbol, timeframe);
+            // Detect & Draw Persistent Active FVG Zones on Chart!
+            const fvgs = detectFVGs(candles, ema200Values, timeframe);
+            const activeUnmitigated = fvgs.filter(f => !f.mitigated);
+            elements.valActiveFvgs.textContent = activeUnmitigated.length;
+
+            drawFvgPriceLines(activeUnmitigated);
         }
     } catch (err) {
         console.error('Failed to load candle data:', err);
@@ -335,152 +464,146 @@ async function loadCandleData(symbol, timeframe) {
 }
 
 /**
- * Fetch Klines from CORS-enabled endpoint
+ * Draw Persistent FVG Price Lines & Shaded Zones on TradingView Chart
  */
-async function fetchKlines(symbol, timeframe) {
-    const intervalMap = { '15m': '15m', '1h': '1h', '4h': '4h', '1d': '1d' };
-    const interval = intervalMap[timeframe] || '1h';
+function drawFvgPriceLines(fvgs) {
+    // Clear previous price lines
+    state.activePriceLines.forEach(line => {
+        try { state.candleSeries.removePriceLine(line); } catch (e) {}
+    });
+    state.activePriceLines = [];
 
-    const res = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=300`);
+    fvgs.forEach(fvg => {
+        const color = fvg.type === 'bullish' ? '#00e676' : '#ff5252';
+        const label = `${fvg.timeframe} ${fvg.type.toUpperCase()} FVG`;
+
+        // Upper Boundary Line
+        const topLine = state.candleSeries.createPriceLine({
+            price: fvg.top,
+            color: color,
+            lineWidth: 2,
+            lineStyle: LightweightCharts.LineStyle.Solid,
+            axisLabelVisible: true,
+            title: `${label} Top`
+        });
+
+        // Lower Boundary Line
+        const bottomLine = state.candleSeries.createPriceLine({
+            price: fvg.bottom,
+            color: color,
+            lineWidth: 2,
+            lineStyle: LightweightCharts.LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: `${label} Bottom`
+        });
+
+        state.activePriceLines.push(topLine, bottomLine);
+    });
+}
+
+/* ==========================================================================
+   FVG & 200 EMA Technical Math Helpers
+   ========================================================================== */
+
+function calculateEMA(closes, period = 200) {
+    if (closes.length < period) return new Array(closes.length).fill(null);
+    const k = 2 / (period + 1);
+    const ema = new Array(closes.length).fill(null);
+
+    // Initial SMA for first period
+    let sum = 0;
+    for (let i = 0; i < period; i++) sum += closes[i];
+    ema[period - 1] = sum / period;
+
+    for (let i = period; i < closes.length; i++) {
+        ema[i] = (closes[i] * k) + (ema[i - 1] * (1 - k));
+    }
+    return ema;
+}
+
+function detectFVGs(candles, ema200, timeframe) {
+    if (candles.length < 4) return [];
+    const fvgs = [];
+    const len = candles.length;
+
+    // Evaluated ONLY AFTER 3rd candle closes (up to index len-1)
+    for (let i = 2; i < len - 1; i++) {
+        const c1 = candles[i - 2];
+        const c2 = candles[i - 1];
+        const c3 = candles[i];
+        const c3Ema = ema200[i];
+
+        if (!c3Ema) continue;
+
+        // Bullish FVG: Candle 1 High < Candle 3 Low
+        if (c1.high < c3.low) {
+            const fvgBottom = c1.high;
+            const fvgTop = c3.low;
+            const emaAligned = c3.close > c3Ema;
+
+            // Check mitigation by subsequent candles
+            let mitigated = false;
+            for (let j = i + 1; j < len; j++) {
+                if (candles[j].low <= fvgBottom) {
+                    mitigated = true;
+                    break;
+                }
+            }
+
+            fvgs.push({
+                type: 'bullish', timeframe, time: c3.time,
+                top: fvgTop, bottom: fvgBottom, emaAligned, mitigated
+            });
+        }
+        // Bearish FVG: Candle 1 Low > Candle 3 High
+        else if (c1.low > c3.high) {
+            const fvgTop = c1.low;
+            const fvgBottom = c3.high;
+            const emaAligned = c3.close < c3Ema;
+
+            let mitigated = false;
+            for (let j = i + 1; j < len; j++) {
+                if (candles[j].high >= fvgTop) {
+                    mitigated = true;
+                    break;
+                }
+            }
+
+            fvgs.push({
+                type: 'bearish', timeframe, time: c3.time,
+                top: fvgTop, bottom: fvgBottom, emaAligned, mitigated
+            });
+        }
+    }
+    return fvgs;
+}
+
+async function fetchKlines(symbol, timeframe, limit = 350) {
+    const intervalMap = { '1m': '1m', '5m': '5m', '15m': '15m', '1h': '1h', '4h': '4h', '1d': '1d' };
+    const interval = intervalMap[timeframe] || '15m';
+
+    const res = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
     if (res.ok) {
         const data = await res.json();
         return data.map(item => ({
             time: Math.floor(item[0] / 1000),
-            open: parseFloat(item[1]),
-            high: parseFloat(item[2]),
-            low: parseFloat(item[3]),
-            close: parseFloat(item[4]),
-            volume: parseFloat(item[5])
+            open: parseFloat(item[1]), high: parseFloat(item[2]),
+            low: parseFloat(item[3]), close: parseFloat(item[4]), volume: parseFloat(item[5])
         }));
     }
     return [];
 }
 
-/**
- * Real-Time WebSocket Streaming Engine for Live Candle Updates
- */
-function connectLiveStream(symbol, timeframe) {
-    const intervalMap = { '15m': '15m', '1h': '1h', '4h': '4h', '1d': '1d' };
-    const interval = intervalMap[timeframe] || '1h';
-    const streamName = `${symbol.toLowerCase()}@kline_${interval}`;
-
-    const wsUrl = `wss://fstream.binance.com/ws/${streamName}`;
-
-    try {
-        state.ws = new WebSocket(wsUrl);
-
-        state.ws.onmessage = (event) => {
-            const msg = JSON.parse(event.data);
-            if (msg && msg.e === 'kline') {
-                const k = msg.k;
-                const candleTime = Math.floor(k.t / 1000);
-                const open = parseFloat(k.o);
-                const high = parseFloat(k.h);
-                const low = parseFloat(k.l);
-                const close = parseFloat(k.c);
-                const volume = parseFloat(k.v);
-
-                // Live Update Candlestick Chart in Real-Time!
-                const liveCandle = { time: candleTime, open, high, low, close };
-                state.candleSeries.update(liveCandle);
-
-                // Live Update Volume Series
-                const volumeColor = close >= open ? 'rgba(0, 230, 118, 0.4)' : 'rgba(255, 82, 82, 0.4)';
-                state.volumeSeries.update({ time: candleTime, value: volume, color: volumeColor });
-
-                // Update Header Live Price & OHLC
-                elements.currentPrice.textContent = formatPrice(close);
-                updateOHLCDisplay(open, high, low, close);
-
-                // Update Sidebar Price Card live
-                if (state.tickers[symbol]) {
-                    state.tickers[symbol].lastPrice = close;
-                    updateSidebarCard(state.tickers[symbol]);
-                }
-
-                elements.valLastUpdated.textContent = new Date().toLocaleTimeString() + ' (Live)';
-            }
-        };
-
-        state.ws.onerror = (err) => {
-            console.warn('WebSocket stream notice:', err);
-        };
-    } catch (e) {
-        console.warn('WebSocket connection error:', e);
+function updateBanner() {
+    const activeSignal = state.signals[state.activeSymbol];
+    if (activeSignal) {
+        const isBull = activeSignal.type === 'bullish';
+        elements.signalBanner.className = `signal-banner ${isBull ? 'bullish' : 'bearish'}`;
+        elements.bannerText.innerHTML = `<strong>${activeSignal.type.toUpperCase()} FVG SIGNAL (${activeSignal.timeframe}):</strong> Confirmed 3rd candle close & Price ${isBull ? 'above' : 'below'} 200 EMA! Active range: [${formatPrice(activeSignal.fvg.bottom)} - ${formatPrice(activeSignal.fvg.top)}]`;
+    } else {
+        elements.signalBanner.className = 'signal-banner neutral';
+        elements.bannerText.textContent = `No active 200 EMA aligned FVG signal for ${state.activeSymbol}. Showing live chart & 200 EMA.`;
     }
-}
-
-/**
- * WebSocket Stream for All Top 5 Tickers
- */
-function initAllTickersWebSocket() {
-    const streams = TOP_5_CRYPTOS.map(c => `${c.symbol.toLowerCase()}@ticker`).join('/');
-    const wsUrl = `wss://fstream.binance.com/stream?streams=${streams}`;
-
-    try {
-        state.wsTicker = new WebSocket(wsUrl);
-
-        state.wsTicker.onmessage = (event) => {
-            const msg = JSON.parse(event.data);
-            if (msg && msg.data && msg.data.e === '24hrTicker') {
-                const item = msg.data;
-                const tickerData = {
-                    symbol: item.s,
-                    lastPrice: parseFloat(item.c),
-                    change24h: parseFloat(item.P),
-                    high24h: parseFloat(item.h),
-                    low24h: parseFloat(item.l),
-                    volume24h: parseFloat(item.q)
-                };
-
-                state.tickers[item.s] = tickerData;
-                updateSidebarCard(tickerData);
-
-                if (item.s === state.activeSymbol) {
-                    updateActiveHeader(tickerData);
-                }
-            }
-        };
-    } catch (e) {
-        console.warn('Ticker stream error:', e);
-    }
-}
-
-/* ==========================================================================
-   UI Formatters & Helpers
-   ========================================================================== */
-
-function updateSidebarCard(ticker) {
-    const priceEl = document.getElementById(`card-price-${ticker.symbol}`);
-    const changeEl = document.getElementById(`card-change-${ticker.symbol}`);
-
-    if (priceEl) priceEl.textContent = formatPrice(ticker.lastPrice);
-    if (changeEl) {
-        const changeClass = ticker.change24h > 0 ? 'positive' : ticker.change24h < 0 ? 'negative' : 'neutral';
-        const changeSign = ticker.change24h > 0 ? '+' : '';
-        changeEl.className = `badge-change ${changeClass}`;
-        changeEl.textContent = `${changeSign}${ticker.change24h.toFixed(2)}%`;
-    }
-}
-
-function updateActiveHeader(ticker) {
-    elements.currentPrice.textContent = formatPrice(ticker.lastPrice);
-    
-    const changeClass = ticker.change24h > 0 ? 'positive' : ticker.change24h < 0 ? 'negative' : 'neutral';
-    const changeSign = ticker.change24h > 0 ? '+' : '';
-    elements.priceChange.className = `price-change-badge ${changeClass}`;
-    elements.priceChange.textContent = `${changeSign}${ticker.change24h.toFixed(2)}%`;
-
-    if (ticker.high24h) elements.val24hHigh.textContent = formatPrice(ticker.high24h);
-    if (ticker.low24h) elements.val24hLow.textContent = formatPrice(ticker.low24h);
-    if (ticker.volume24h) elements.val24hVolume.textContent = '$' + formatCompactNumber(ticker.volume24h);
-}
-
-function updateOHLCDisplay(o, h, l, c) {
-    elements.ohlcOpen.textContent = formatPrice(o);
-    elements.ohlcHigh.textContent = formatPrice(h);
-    elements.ohlcLow.textContent = formatPrice(l);
-    elements.ohlcClose.textContent = formatPrice(c);
 }
 
 function formatPrice(price) {
@@ -491,18 +614,7 @@ function formatPrice(price) {
     return num.toFixed(4);
 }
 
-function formatCompactNumber(num) {
-    if (!num) return '0';
-    if (num >= 1e9) return (num / 1e9).toFixed(2) + 'B';
-    if (num >= 1e6) return (num / 1e6).toFixed(2) + 'M';
-    if (num >= 1e3) return (num / 1e3).toFixed(2) + 'K';
-    return num.toFixed(2);
-}
-
 function showChartLoader(show) {
-    if (show) {
-        elements.chartLoader.classList.remove('hidden');
-    } else {
-        elements.chartLoader.classList.add('hidden');
-    }
+    if (show) elements.chartLoader.classList.remove('hidden');
+    else elements.chartLoader.classList.add('hidden');
 }
