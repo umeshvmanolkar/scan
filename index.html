@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crypto Futures Scanner - Top 5</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <!-- TradingView Lightweight Charts CDN -->
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Top Navigation Header -->
+        <header class="app-header">
+            <div class="header-brand">
+                <div class="logo-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="#38EF7D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M2 17L12 22L22 17" stroke="#38EF7D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M2 12L12 17L22 12" stroke="#38EF7D" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+                <div class="brand-text">
+                    <h1>SHARK <span>FUTURES</span></h1>
+                    <span class="badge-gh">GitHub Pages Compatible</span>
+                </div>
+            </div>
+            
+            <div class="header-actions">
+                <div class="connection-status" id="connectionStatus">
+                    <span class="status-dot online"></span>
+                    <span class="status-text">Connected</span>
+                </div>
+                <div class="data-source-badge">
+                    <span class="source-label">Source:</span>
+                    <span class="source-value" id="dataSourceName">Shark Futures / Public Stream</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Dashboard Layout -->
+        <main class="dashboard-main">
+            <!-- Sidebar: Top 5 Crypto Pair Selector -->
+            <aside class="sidebar">
+                <div class="sidebar-header">
+                    <h2>Top 5 Cryptos</h2>
+                    <span class="subtitle">Futures Market</span>
+                </div>
+
+                <div class="crypto-list" id="cryptoList">
+                    <!-- Dynamic rendering by app.js -->
+                    <div class="crypto-card loading-skeleton">
+                        <div class="skeleton-line"></div>
+                        <div class="skeleton-line short"></div>
+                    </div>
+                </div>
+
+                <div class="sidebar-footer">
+                    <p>Click any pair to load interactive chart.</p>
+                </div>
+            </aside>
+
+            <!-- Chart Section -->
+            <section class="chart-section">
+                <!-- Active Pair Bar & Timeframe Controls -->
+                <div class="chart-controls-bar">
+                    <div class="active-crypto-info">
+                        <div class="active-symbol-group">
+                            <span class="active-symbol" id="activeSymbol">BTCUSDT</span>
+                            <span class="active-type">PERPETUAL</span>
+                        </div>
+                        <div class="active-price-group">
+                            <span class="current-price" id="currentPrice">--.--</span>
+                            <span class="price-change-badge neutral" id="priceChange">0.00%</span>
+                        </div>
+                        <div class="ohlc-summary" id="ohlcSummary">
+                            <span>O: <strong id="ohlcOpen">--</strong></span>
+                            <span>H: <strong id="ohlcHigh">--</strong></span>
+                            <span>L: <strong id="ohlcLow">--</strong></span>
+                            <span>C: <strong id="ohlcClose">--</strong></span>
+                        </div>
+                    </div>
+
+                    <div class="timeframe-controls" id="timeframeSelector">
+                        <button class="tf-btn" data-tf="15m">15m</button>
+                        <button class="tf-btn active" data-tf="1h">1h</button>
+                        <button class="tf-btn" data-tf="4h">4h</button>
+                        <button class="tf-btn" data-tf="1d">1D</button>
+                    </div>
+                </div>
+
+                <!-- Interactive Chart Canvas Container -->
+                <div class="chart-wrapper">
+                    <div id="chartContainer" class="chart-container"></div>
+                    <div class="chart-overlay-loader" id="chartLoader">
+                        <div class="spinner"></div>
+                        <span>Loading Market Data...</span>
+                    </div>
+                </div>
+
+                <!-- Scanner Info Bar -->
+                <div class="scanner-info-bar">
+                    <div class="info-item">
+                        <span class="info-label">24h High:</span>
+                        <span class="info-val" id="val24hHigh">--</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">24h Low:</span>
+                        <span class="info-val" id="val24hLow">--</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">24h Volume:</span>
+                        <span class="info-val" id="val24hVolume">--</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Last Updated:</span>
+                        <span class="info-val" id="valLastUpdated">Just now</span>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
