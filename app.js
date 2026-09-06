@@ -1,6 +1,6 @@
 /**
  * Crypto Futures Scanner Prototype - Top 5 Cryptos
- * GitHub Pages Compatible - Lightweight Charts Integration
+ * GitHub Pages Compatible - Real-Time WebSocket & Lightweight Charts Engine
  */
 
 // Top 5 Futures Assets
@@ -20,8 +20,10 @@ const state = {
     chart: null,
     candleSeries: null,
     volumeSeries: null,
-    isLoading: false,
-    dataSource: 'Shark / Public Stream'
+    ws: null,
+    wsTicker: null,
+    currentCandle: null,
+    dataSource: 'Futures Real-time Feed'
 };
 
 // DOM Element Selectors
@@ -51,13 +53,14 @@ document.addEventListener('DOMContentLoaded', () => {
     bindEvents();
     fetchMarketOverview();
     loadCandleData(state.activeSymbol, state.activeTimeframe);
+    initAllTickersWebSocket();
 
-    // Auto refresh market overview ticker every 5 seconds
-    setInterval(fetchMarketOverview, 5000);
+    // Auto refresh tickers every 10 seconds as backup
+    setInterval(fetchMarketOverview, 10000);
 });
 
 /* ==========================================================================
-   Chart Initialization & Configuration
+   Chart Initialization & Configuration (Isolated Volume & AutoScale)
    ========================================================================== */
 function initChart() {
     if (!window.LightweightCharts) {
@@ -94,6 +97,7 @@ function initChart() {
         },
         rightPriceScale: {
             borderColor: 'rgba(255, 255, 255, 0.08)',
+            autoScale: true,
             scaleMargins: {
                 top: 0.1,
                 bottom: 0.25
@@ -108,7 +112,7 @@ function initChart() {
 
     state.chart = LightweightCharts.createChart(elements.chartContainer, chartOptions);
 
-    // Candlestick Series
+    // Candlestick Series on main price scale ('right')
     state.candleSeries = state.chart.addCandlestickSeries({
         upColor: '#00e676',
         downColor: '#ff5252',
@@ -118,13 +122,16 @@ function initChart() {
         wickDownColor: '#ff5252'
     });
 
-    // Volume Histogram Series
+    // Volume Series on isolated 'volume' price scale to prevent scale overlap
     state.volumeSeries = state.chart.addHistogramSeries({
-        color: '#26a69a',
-        priceFormat: { type: 'volume' },
-        priceScaleId: '',
+        priceScaleId: 'volume_scale',
+        priceFormat: { type: 'volume' }
+    });
+
+    // Configure dedicated volume scale margins at the bottom
+    state.chart.priceScale('volume_scale').applyOptions({
         scaleMargins: {
-            top: 0.75,
+            top: 0.8,
             bottom: 0
         }
     });
@@ -138,7 +145,7 @@ function initChart() {
     });
     resizeObserver.observe(elements.chartContainer);
 
-    // Crosshair movement listener to update OHLC header in real-time
+    // Crosshair movement listener to update OHLC header
     state.chart.subscribeCrosshairMove(param => {
         if (!param || !param.time || !param.seriesPrices) return;
         const data = param.seriesPrices.get(state.candleSeries);
@@ -192,7 +199,7 @@ function renderCryptoSidebar() {
 }
 
 /* ==========================================================================
-   Event Bindings
+   Event Bindings & Switching
    ========================================================================== */
 function bindEvents() {
     // Timeframe selector clicks
@@ -228,63 +235,71 @@ function switchActiveCrypto(symbol) {
         updateActiveHeader(ticker);
     }
 
-    // Load candle chart
+    // Load candle chart for new symbol
     loadCandleData(symbol, state.activeTimeframe);
 }
 
 /* ==========================================================================
-   Data Fetching & CORS Fallback Logic
+   Data Fetching & WebSocket Real-Time Stream Engine
    ========================================================================== */
 
 /**
- * Fetch Market Tickers for Top 5 Cryptos
+ * Fetch Market Tickers overview
  */
 async function fetchMarketOverview() {
     try {
-        // Attempt fetch with fallback mechanisms for CORS safety on GitHub Pages
-        const tickersData = await getTickersWithFallback();
+        const symbolsQuery = JSON.stringify(TOP_5_CRYPTOS.map(c => c.symbol));
+        const res = await fetch(`https://fapi.binance.com/fapi/v1/ticker/24hr?symbols=${encodeURIComponent(symbolsQuery)}`);
         
-        tickersData.forEach(t => {
-            state.tickers[t.symbol] = t;
+        if (res.ok) {
+            const data = await res.json();
+            data.forEach(item => {
+                const tickerData = {
+                    symbol: item.symbol,
+                    lastPrice: parseFloat(item.lastPrice),
+                    change24h: parseFloat(item.priceChangePercent),
+                    high24h: parseFloat(item.highPrice),
+                    low24h: parseFloat(item.lowPrice),
+                    volume24h: parseFloat(item.quoteVolume)
+                };
+                state.tickers[item.symbol] = tickerData;
+                updateSidebarCard(tickerData);
+            });
 
-            // Update sidebar elements live
-            const priceEl = document.getElementById(`card-price-${t.symbol}`);
-            const changeEl = document.getElementById(`card-change-${t.symbol}`);
-
-            if (priceEl) priceEl.textContent = formatPrice(t.lastPrice);
-            if (changeEl) {
-                const changeClass = t.change24h > 0 ? 'positive' : t.change24h < 0 ? 'negative' : 'neutral';
-                const changeSign = t.change24h > 0 ? '+' : '';
-                changeEl.className = `badge-change ${changeClass}`;
-                changeEl.textContent = `${changeSign}${t.change24h.toFixed(2)}%`;
+            const activeTicker = state.tickers[state.activeSymbol];
+            if (activeTicker) {
+                updateActiveHeader(activeTicker);
             }
-        });
 
-        // Update active header metrics
-        const activeTicker = state.tickers[state.activeSymbol];
-        if (activeTicker) {
-            updateActiveHeader(activeTicker);
+            elements.valLastUpdated.textContent = new Date().toLocaleTimeString();
         }
-
-        elements.valLastUpdated.textContent = new Date().toLocaleTimeString();
     } catch (err) {
-        console.warn('Ticker fetch notification:', err);
+        console.warn('Ticker update note:', err);
     }
 }
 
 /**
- * Fetch Historical Candle (Kline) Data
+ * Load Historical Candlestick Data & Connect Real-Time Stream
  */
 async function loadCandleData(symbol, timeframe) {
     showChartLoader(true);
 
+    // Disconnect existing chart websocket stream
+    if (state.ws) {
+        state.ws.close();
+        state.ws = null;
+    }
+
     try {
-        const candles = await getCandlesWithFallback(symbol, timeframe);
+        const candles = await fetchKlines(symbol, timeframe);
 
         if (candles && candles.length > 0) {
-            // Format for TradingView Lightweight Charts
+            // Reset series and apply autoScale
+            state.candleSeries.setData([]);
+            state.volumeSeries.setData([]);
+
             const candleFormatted = candles.map(c => ({
-                time: c.time, // Unix timestamp in seconds
+                time: c.time,
                 open: c.open,
                 high: c.high,
                 low: c.low,
@@ -299,11 +314,18 @@ async function loadCandleData(symbol, timeframe) {
 
             state.candleSeries.setData(candleFormatted);
             state.volumeSeries.setData(volumeFormatted);
+
+            // Re-scale right axis for exact price range of selected crypto
+            state.chart.priceScale('right').applyOptions({ autoScale: true });
             state.chart.timeScale().fitContent();
 
             // Set OHLC summary to latest candle
             const lastCandle = candleFormatted[candleFormatted.length - 1];
+            state.currentCandle = lastCandle;
             updateOHLCDisplay(lastCandle.open, lastCandle.high, lastCandle.low, lastCandle.close);
+
+            // Connect Live WebSocket Stream for active symbol & timeframe!
+            connectLiveStream(symbol, timeframe);
         }
     } catch (err) {
         console.error('Failed to load candle data:', err);
@@ -312,115 +334,133 @@ async function loadCandleData(symbol, timeframe) {
     }
 }
 
-/* ==========================================================================
-   Fallback Endpoint Providers (CORS Resilient)
-   ========================================================================== */
-
-async function getTickersWithFallback() {
-    // Primary: Shark Exchange public ticker endpoint (or fallback)
-    try {
-        const res = await fetch('https://api.sharkexchange.in/v1/market/ticker24Hr');
-        if (res.ok) {
-            const data = await res.json();
-            state.dataSource = 'Shark Futures API';
-            elements.dataSourceName.textContent = state.dataSource;
-            return parseTickersResponse(data);
-        }
-    } catch (e) {
-        // Fallback for client-side GitHub Pages execution
-    }
-
-    // Direct Browser Fallback: Binance Public Futures API
-    try {
-        const symbolsQuery = JSON.stringify(TOP_5_CRYPTOS.map(c => c.symbol));
-        const res = await fetch(`https://fapi.binance.com/fapi/v1/ticker/24hr?symbols=${encodeURIComponent(symbolsQuery)}`);
-        if (res.ok) {
-            const data = await res.json();
-            state.dataSource = 'Futures Public Stream (CORS Direct)';
-            elements.dataSourceName.textContent = state.dataSource;
-            return data.map(item => ({
-                symbol: item.symbol,
-                lastPrice: parseFloat(item.lastPrice),
-                change24h: parseFloat(item.priceChangePercent),
-                high24h: parseFloat(item.highPrice),
-                low24h: parseFloat(item.lowPrice),
-                volume24h: parseFloat(item.quoteVolume)
-            }));
-        }
-    } catch (e) {
-        console.warn('Fallback ticker fetch failed:', e);
-    }
-
-    // Mock data generator for offline testing or fail-safe fallback
-    return generateMockTickers();
-}
-
-async function getCandlesWithFallback(symbol, timeframe) {
-    // Interval mapping
+/**
+ * Fetch Klines from CORS-enabled endpoint
+ */
+async function fetchKlines(symbol, timeframe) {
     const intervalMap = { '15m': '15m', '1h': '1h', '4h': '4h', '1d': '1d' };
     const interval = intervalMap[timeframe] || '1h';
 
-    // Primary Attempt: Shark Exchange Klines Endpoint
-    try {
-        const res = await fetch(`https://api.sharkexchange.in/v1/market/klines?symbol=${symbol}&interval=${interval}&limit=200`);
-        if (res.ok) {
-            const data = await res.json();
-            return parseKlinesResponse(data);
-        }
-    } catch (e) {
-        // Fallback to CORS-enabled public futures data stream
+    const res = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=300`);
+    if (res.ok) {
+        const data = await res.json();
+        return data.map(item => ({
+            time: Math.floor(item[0] / 1000),
+            open: parseFloat(item[1]),
+            high: parseFloat(item[2]),
+            low: parseFloat(item[3]),
+            close: parseFloat(item[4]),
+            volume: parseFloat(item[5])
+        }));
     }
+    return [];
+}
 
-    // Fallback: Binance Futures Public Klines Endpoint
+/**
+ * Real-Time WebSocket Streaming Engine for Live Candle Updates
+ */
+function connectLiveStream(symbol, timeframe) {
+    const intervalMap = { '15m': '15m', '1h': '1h', '4h': '4h', '1d': '1d' };
+    const interval = intervalMap[timeframe] || '1h';
+    const streamName = `${symbol.toLowerCase()}@kline_${interval}`;
+
+    const wsUrl = `wss://fstream.binance.com/ws/${streamName}`;
+
     try {
-        const res = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=200`);
-        if (res.ok) {
-            const data = await res.json();
-            return data.map(item => ({
-                time: Math.floor(item[0] / 1000), // convert ms to seconds
-                open: parseFloat(item[1]),
-                high: parseFloat(item[2]),
-                low: parseFloat(item[3]),
-                close: parseFloat(item[4]),
-                volume: parseFloat(item[5])
-            }));
-        }
-    } catch (e) {
-        console.warn('Kline fallback fetch failed:', e);
-    }
+        state.ws = new WebSocket(wsUrl);
 
-    // Generate fallback mock candles if offline
-    return generateMockCandles(symbol, interval);
+        state.ws.onmessage = (event) => {
+            const msg = JSON.parse(event.data);
+            if (msg && msg.e === 'kline') {
+                const k = msg.k;
+                const candleTime = Math.floor(k.t / 1000);
+                const open = parseFloat(k.o);
+                const high = parseFloat(k.h);
+                const low = parseFloat(k.l);
+                const close = parseFloat(k.c);
+                const volume = parseFloat(k.v);
+
+                // Live Update Candlestick Chart in Real-Time!
+                const liveCandle = { time: candleTime, open, high, low, close };
+                state.candleSeries.update(liveCandle);
+
+                // Live Update Volume Series
+                const volumeColor = close >= open ? 'rgba(0, 230, 118, 0.4)' : 'rgba(255, 82, 82, 0.4)';
+                state.volumeSeries.update({ time: candleTime, value: volume, color: volumeColor });
+
+                // Update Header Live Price & OHLC
+                elements.currentPrice.textContent = formatPrice(close);
+                updateOHLCDisplay(open, high, low, close);
+
+                // Update Sidebar Price Card live
+                if (state.tickers[symbol]) {
+                    state.tickers[symbol].lastPrice = close;
+                    updateSidebarCard(state.tickers[symbol]);
+                }
+
+                elements.valLastUpdated.textContent = new Date().toLocaleTimeString() + ' (Live)';
+            }
+        };
+
+        state.ws.onerror = (err) => {
+            console.warn('WebSocket stream notice:', err);
+        };
+    } catch (e) {
+        console.warn('WebSocket connection error:', e);
+    }
+}
+
+/**
+ * WebSocket Stream for All Top 5 Tickers
+ */
+function initAllTickersWebSocket() {
+    const streams = TOP_5_CRYPTOS.map(c => `${c.symbol.toLowerCase()}@ticker`).join('/');
+    const wsUrl = `wss://fstream.binance.com/stream?streams=${streams}`;
+
+    try {
+        state.wsTicker = new WebSocket(wsUrl);
+
+        state.wsTicker.onmessage = (event) => {
+            const msg = JSON.parse(event.data);
+            if (msg && msg.data && msg.data.e === '24hrTicker') {
+                const item = msg.data;
+                const tickerData = {
+                    symbol: item.s,
+                    lastPrice: parseFloat(item.c),
+                    change24h: parseFloat(item.P),
+                    high24h: parseFloat(item.h),
+                    low24h: parseFloat(item.l),
+                    volume24h: parseFloat(item.q)
+                };
+
+                state.tickers[item.s] = tickerData;
+                updateSidebarCard(tickerData);
+
+                if (item.s === state.activeSymbol) {
+                    updateActiveHeader(tickerData);
+                }
+            }
+        };
+    } catch (e) {
+        console.warn('Ticker stream error:', e);
+    }
 }
 
 /* ==========================================================================
-   Helper Functions & UI Formatters
+   UI Formatters & Helpers
    ========================================================================== */
 
-function parseTickersResponse(data) {
-    if (!Array.isArray(data)) return generateMockTickers();
-    return data
-        .filter(item => TOP_5_CRYPTOS.some(c => c.symbol === item.symbol))
-        .map(item => ({
-            symbol: item.symbol,
-            lastPrice: parseFloat(item.lastPrice || item.price || 0),
-            change24h: parseFloat(item.priceChangePercent || item.change || 0),
-            high24h: parseFloat(item.highPrice || 0),
-            low24h: parseFloat(item.lowPrice || 0),
-            volume24h: parseFloat(item.quoteVolume || item.volume || 0)
-        }));
-}
+function updateSidebarCard(ticker) {
+    const priceEl = document.getElementById(`card-price-${ticker.symbol}`);
+    const changeEl = document.getElementById(`card-change-${ticker.symbol}`);
 
-function parseKlinesResponse(data) {
-    if (!Array.isArray(data)) return [];
-    return data.map(item => ({
-        time: Math.floor((item.time || item[0]) / 1000),
-        open: parseFloat(item.open || item[1]),
-        high: parseFloat(item.high || item[2]),
-        low: parseFloat(item.low || item[3]),
-        close: parseFloat(item.close || item[4]),
-        volume: parseFloat(item.volume || item[5])
-    }));
+    if (priceEl) priceEl.textContent = formatPrice(ticker.lastPrice);
+    if (changeEl) {
+        const changeClass = ticker.change24h > 0 ? 'positive' : ticker.change24h < 0 ? 'negative' : 'neutral';
+        const changeSign = ticker.change24h > 0 ? '+' : '';
+        changeEl.className = `badge-change ${changeClass}`;
+        changeEl.textContent = `${changeSign}${ticker.change24h.toFixed(2)}%`;
+    }
 }
 
 function updateActiveHeader(ticker) {
@@ -465,39 +505,4 @@ function showChartLoader(show) {
     } else {
         elements.chartLoader.classList.add('hidden');
     }
-}
-
-/* Fallback Mock Data Generators */
-function generateMockTickers() {
-    return [
-        { symbol: 'BTCUSDT', lastPrice: 89450.50, change24h: 2.34, high24h: 90200, low24h: 87500, volume24h: 18500000000 },
-        { symbol: 'ETHUSDT', lastPrice: 3420.75, change24h: -1.12, high24h: 3510, low24h: 3380, volume24h: 8400000000 },
-        { symbol: 'SOLUSDT', lastPrice: 198.40, change24h: 5.67, high24h: 204, low24h: 185, volume24h: 4200000000 },
-        { symbol: 'BNBUSDT', lastPrice: 615.20, change24h: 0.85, high24h: 622, low24h: 605, volume24h: 1100000000 },
-        { symbol: 'XRPUSDT', lastPrice: 1.45, change24h: -3.20, high24h: 1.54, low24h: 1.41, volume24h: 2900000000 }
-    ];
-}
-
-function generateMockCandles(symbol, interval) {
-    const basePriceMap = { BTCUSDT: 89000, ETHUSDT: 3400, SOLUSDT: 195, BNBUSDT: 610, XRPUSDT: 1.42 };
-    let currentPrice = basePriceMap[symbol] || 100;
-
-    const candles = [];
-    const now = Math.floor(Date.now() / 1000);
-    const stepSeconds = interval === '15m' ? 900 : interval === '1h' ? 3600 : interval === '4h' ? 14400 : 86400;
-
-    for (let i = 150; i >= 0; i--) {
-        const time = now - (i * stepSeconds);
-        const changePct = (Math.random() - 0.49) * 0.02;
-        const open = currentPrice;
-        const close = open * (1 + changePct);
-        const high = Math.max(open, close) * (1 + Math.random() * 0.005);
-        const low = Math.min(open, close) * (1 - Math.random() * 0.005);
-        const volume = Math.random() * 500 + 100;
-
-        candles.push({ time, open, high, low, close, volume });
-        currentPrice = close;
-    }
-
-    return candles;
 }
