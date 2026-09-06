@@ -473,7 +473,10 @@ function drawFvgPriceLines(fvgs) {
     });
     state.activePriceLines = [];
 
-    fvgs.forEach(fvg => {
+    // Keep only the most recent 3 active unmitigated FVGs to keep chart clean & uncluttered
+    const displayFvgs = fvgs.slice(-3);
+
+    displayFvgs.forEach(fvg => {
         const color = fvg.type === 'bullish' ? '#00e676' : '#ff5252';
         const label = `${fvg.timeframe} ${fvg.type.toUpperCase()} FVG`;
 
@@ -541,10 +544,10 @@ function detectFVGs(candles, ema200, timeframe) {
             const fvgTop = c3.low;
             const emaAligned = c3.close > c3Ema;
 
-            // Check mitigation by subsequent candles
+            // Check mitigation by subsequent candles (gap entered/touched)
             let mitigated = false;
             for (let j = i + 1; j < len; j++) {
-                if (candles[j].low <= fvgBottom) {
+                if (candles[j].low <= fvgTop) {
                     mitigated = true;
                     break;
                 }
@@ -563,7 +566,7 @@ function detectFVGs(candles, ema200, timeframe) {
 
             let mitigated = false;
             for (let j = i + 1; j < len; j++) {
-                if (candles[j].high >= fvgTop) {
+                if (candles[j].high >= fvgBottom) {
                     mitigated = true;
                     break;
                 }

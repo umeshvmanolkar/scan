@@ -75,7 +75,7 @@ def detect_fvgs(candles: List[Dict[str, Any]], ema_200: List[float], timeframe: 
             mitigated = False
             mitigated_time = None
             for j in range(i + 1, num_candles):
-                if candles[j]["low"] <= fvg_bottom:
+                if candles[j]["low"] <= fvg_top:
                     mitigated = True
                     mitigated_time = candles[j]["time"]
                     break
@@ -106,7 +106,7 @@ def detect_fvgs(candles: List[Dict[str, Any]], ema_200: List[float], timeframe: 
             mitigated = False
             mitigated_time = None
             for j in range(i + 1, num_candles):
-                if candles[j]["high"] >= fvg_top:
+                if candles[j]["high"] >= fvg_bottom:
                     mitigated = True
                     mitigated_time = candles[j]["time"]
                     break
